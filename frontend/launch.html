@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+	<link rel="icon" type="image/x-icon" href="assets/img/favicon.png">
+    <link rel='stylesheet' type='text/css' href='./assets/lib/css/example-smart-app.css'>
+    <title>ACL Chat Bot</title>
+  </head>
+  <body>
+    <script src='./assets/lib/js/fhir-client-v0.1.12.js'></script>
+    <script src='./assets/lib/js/fhir-client-cerner-additions-1.0.0.js'></script>
+    <script>
+      FHIR.oauth2.authorize({
+        'client_id': '4af74ba5-cd31-4fea-9972-4006514c9d0c',
+        'scope': 'user/AllergyIntolerance.read user/AllergyIntolerance.write user/DocumentReference.read user/DocumentReference.write user/FamilyMemberHistory.read user/FamilyMemberHistory.write user/Immunization.read user/Immunization.write user/MedicationAdministration.read user/MedicationAdministration.write user/MedicationRequest.read user/MedicationRequest.write user/NutritionOrder.read user/Observation.read user/Organization.read user/Organization.write user/Patient.read user/Patient.write user/Person.read user/Provenance.read user/Provenance.write user/Procedure.read user/Procedure.write launch online_access openid profile'
+      });
+    </script>
+    <div class="spinner">
+      <div class="bounce1"></div>
+      <div class="bounce2"></div>
+      <div class="bounce3"></div>
+    </div>
+  </body>
+</html>
