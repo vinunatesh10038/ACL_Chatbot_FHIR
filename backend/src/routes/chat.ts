@@ -3,7 +3,7 @@ import { apiKeyRole, requireRole, basicAuth } from '../middleware/auth';
 import { getOpenAIClient, deployment } from '../azure/openai';
 import { writeAudit } from '../audit/audit';
 
-type ConversationMemory = { lastAllergyId?: string; lastPatientId?: string; lastMedicationRequestId?: string; lastFamilyMemberHistoryId?: string; lastImmunizationId?:string };
+type ConversationMemory = { lastAllergyId?: string; lastPatientId?: string; lastMedicationRequestId?: string; lastFamilyMemberHistoryId?: string; lastImmunizationId?: string; lastPersonId?: string; lastProcedureId?: string };
 const memoryStore = new Map<string, ConversationMemory>();
 
 // Simple in-memory conversation memory store (volatile)
@@ -209,8 +209,57 @@ const tools = [
         },
         required: ['patient']
       }
+    },
+
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_persons",
+      description: "Search for Person resources with optional filters. Returns a FHIR Person bundle.",
+      parameters: {
+        type: "object",
+        properties: {
+          _id: { type: "string", description: "Filter by specific Person resource ID." },
+          identifier: { type: "string", description: "Person identifier; include system|value, e.g. 'urn:oid:2.16.840.1.113883.6.1000|31577'." },
+          name: { type: "string", description: "Search by person name." },
+          gender: { type: "string", description: "male | female | other | unknown" },
+          birthdate: { type: "string", description: "Birth date filter, e.g., 'ge2020-01-01'." },
+          _count: { type: "integer", description: "Maximum number of Person records to return." },
+          _include: { type: "string", description: "Include related resources." },
+          _revinclude: { type: "string", description: "Include reverse-linked resources." },
+          _page: { type: "string", description: "Page token for paginated responses." }
+        },
+        required: ["_id"] // the docs say _id required if identifier not used; choose identifier as required for typical queries
+      }
     }
-  }];
+  },
+  {
+    type: "function",
+    function: {
+      name: "get_procedures",
+      description: "Search for Procedure resources with optional filters. Returns a FHIR Procedure bundle.",
+      parameters: {
+        type: "object",
+        properties: {
+          _id: { type: "string", description: "Specific Procedure resource ID." },
+          patient: { type: "string", description: "Patient ID (required if _id/subject not used)." },
+          subject: { type: "string", description: "Subject reference (e.g., 'Patient/12345')." },
+          date: { type: "string", description: "Date range for performedDateTime / performedPeriod." },
+          _lastUpdated: { type: "string", description: "Filter by lastUpdated timestamp (can't be used with date)." },
+          category: { type: "string" },
+          code: { type: "string" },
+          _revinclude: { type: "string" },
+          _count: { type: "integer" },
+          _include: { type: "string" },
+          _sort: { type: "string" },
+          _page: { type: "string" }
+        },
+        required: ["patient"]
+      }
+    }
+  }
+];
 
 export const chatRouter = Router();
 
@@ -392,9 +441,16 @@ chatRouter.post('/', requireRole(['Doctor', 'Admin']), async (req, res) => {
         memoryStore.set(convId, { ...memory });
 
         // Extract family member history details from the bundle
-        const familyHistories = bundle.familyMemberHistories?.map((f: any) => ({
-          description: `${f.relationship || 'Unknown relationship'} (${f.sex || 'unspecified'}) - Status: ${f.status || 'unknown'}`,
-        })) || [];
+        const familyHistories =
+          bundle.familyMemberHistories
+            ?.filter((f: any) => Array.isArray(f.conditions) && f.conditions.length > 0)
+            .map((f: any) => {
+              // Each condition may already be formatted as "Hypertension - Negative"
+              const conditionDescriptions = f.conditions.join(', ');
+              return {
+                description: `${f.relationship} - ${conditionDescriptions}`,
+              };
+            }) || [];
 
         return res.json({
           descriptions: familyHistories.map((f: any) => f.description),
@@ -433,6 +489,63 @@ chatRouter.post('/', requireRole(['Doctor', 'Admin']), async (req, res) => {
           count: immunizationSummaries.length
         });
       }
+
+      // inside your existing tool-response handler
+      if (toolName === "get_persons") {
+        const bundle = toolJson as any;
+
+        if (bundle?.resourceType === "Bundle" && bundle.entry?.length > 0) {
+          const firstEntry = bundle.entry[0];
+          if (firstEntry?.resource?.id) {
+            memory.lastPersonId = String(firstEntry.resource.id);
+          }
+        }
+
+        memoryStore.set(convId, { ...memory });
+
+        const persons = bundle.entry?.map((entry: any) => {
+          const r = entry.resource;
+          if (!r || r.resourceType !== "Person") return null;
+          const name = r.name?.[0]?.text ||
+            (r.name?.[0] ? `${r.name?.[0].given?.join(" ") || ""} ${r.name?.[0].family || ""}`.trim() : "Unknown");
+          return {
+            description: `${name} — ${r.gender || "unknown"} — DOB: ${r.birthDate || "n/a"}`
+          };
+        }).filter(Boolean) || [];
+
+        return res.json({
+          descriptions: persons.map((p: any) => p.description),
+          count: persons.length
+        });
+      }
+
+      if (toolName === "get_procedures") {
+        const bundle = toolJson as any;
+
+        if (bundle?.resourceType === "Bundle" && bundle.entry?.length > 0) {
+          const firstEntry = bundle.entry[0];
+          if (firstEntry?.resource?.id) {
+            memory.lastProcedureId = String(firstEntry.resource.id);
+          }
+        }
+
+        memoryStore.set(convId, { ...memory });
+
+        const procedureSummaries =
+          bundle.procedures
+            ?.filter((p: any) => p.performed) // ✅ Only include if 'performed' exists
+            .map((p: any) => {
+              const formattedDate = formatDate(p.performed);
+              return {
+                description: `${p.code} - ${p.status} - ${formattedDate}`,
+              };
+            }) || [];
+        return res.json({
+          descriptions: procedureSummaries.map((p: any) => p.description),
+          count: procedureSummaries.length
+        });
+      }
+
 
 
 
@@ -525,5 +638,18 @@ function normalizeMessagesForAzure(messages: any[]) {
     // If content is already a string, keep as-is
     return m;
   });
+}
+
+function formatDate(date: string | Date): string {
+  const d = new Date(date);
+
+  const year = d.getUTCFullYear();
+  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const hours = String(d.getUTCHours()).padStart(2, "0");
+  const minutes = String(d.getUTCMinutes()).padStart(2, "0");
+  const seconds = String(d.getUTCSeconds()).padStart(2, "0");
+
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 

@@ -100,6 +100,32 @@ export const GetImmunizationsInput = z.object({
   _page: z.string().optional()
 });
 
+export const GetPersonsInput = z.object({
+  _id: z.string().optional(),                // single id (docs show array allowed; single string is convenient)
+  identifier: z.string().optional(),         // e.g. urn:oid:2.16.840.1.113883.3.13.6|01022228
+  name: z.string().optional(),               // search by name
+  gender: z.enum(["male", "female", "other", "unknown"]).optional(),
+  birthdate: z.string().optional(),          // e.g., gt2020-01-01
+  _count: z.string().optional(),
+  _page: z.string().optional(),
+  _include: z.string().optional(),
+  _revinclude: z.string().optional()
+});
+
+export const GetProceduresInput = z.object({
+  _id: z.string().optional(),                 // resource id (required if patient/subject not used)
+  patient: z.string().optional(),             // patient ID (required if _id/subject not used)
+  subject: z.string().optional(),             // e.g., "Patient/12345"
+  date: z.string().optional(),                // e.g., "ge2015-09-24T00:00:00Z"
+  _lastUpdated: z.string().optional(),        // lastUpdated filter (note: cannot be used with date)
+  category: z.string().optional(),
+  code: z.string().optional(),
+  _revinclude: z.string().optional(),         // e.g., "Provenance:target"
+  _count: z.string().optional(),
+  _include: z.string().optional(),
+  _sort: z.string().optional(),
+  _page: z.string().optional()
+});
 
 
 

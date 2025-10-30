@@ -1,22 +1,30 @@
 import express, { Request, Response } from 'express';
 import {
-  GetAllergyIntolerancesInput, GetPatientsInput, GetMedicationRequestsInput, GetFamilyMemberHistoryInput,GetImmunizationsInput,
-  ErrorResponse
+  GetAllergyIntolerancesInput, GetPatientsInput, GetMedicationRequestsInput, GetFamilyMemberHistoryInput, GetImmunizationsInput, GetPersonsInput,
+  GetProceduresInput
 } from './schemas';
 import {
   getAllergyIntolerances,
   extractAllergyDescriptions
- } from '../service/allergyintolerance-service';
- import {
-   getPatients
- } from '../service/patient-service';
- import {
-   getMedicationRequests
- } from '../service/medicationrequest-service';
-  import { getFamilyMemberHistory
- } from '../service/familymemberhistory-service';
-  import { getImmunizations
- } from '../service/immunization-service';
+} from '../service/allergyintolerance-service';
+import {
+  getPatients
+} from '../service/patient-service';
+import {
+  getMedicationRequests
+} from '../service/medicationrequest-service';
+import {
+  getFamilyMemberHistory
+} from '../service/familymemberhistory-service';
+import {
+  getImmunizations
+} from '../service/immunization-service';
+import {
+  getPersons
+} from '../service/person-service';
+import {
+  getProcedures
+} from '../service/procedure-service';
 
 export const mcpRouter = express.Router();
 
@@ -63,7 +71,7 @@ mcpRouter.post('/get_allergy_intolerances', async (req: Request, res: Response) 
   }
 
   try {
-    const bundle = await getAllergyIntolerances(parse.data,accessToken);
+    const bundle = await getAllergyIntolerances(parse.data, accessToken);
     const descriptions = extractAllergyDescriptions(bundle);
     res.json({
       success: true,
@@ -101,7 +109,7 @@ mcpRouter.post('/get_patients', async (req: Request, res: Response) => {
   }
 
   try {
-    const bundle = await getPatients(parse.data,accessToken); // Your service function
+    const bundle = await getPatients(parse.data, accessToken); // Your service function
 
     // Extract patient details from the bundle
     const patients = bundle.entry?.map((e) => ({
@@ -149,7 +157,7 @@ mcpRouter.post('/get_medication_requests', async (req: Request, res: Response) =
 
   try {
     // Call your FHIR service to fetch MedicationRequest bundle
-    const bundle = await getMedicationRequests(parse.data,accessToken);
+    const bundle = await getMedicationRequests(parse.data, accessToken);
 
     // Extract relevant MedicationRequest details from the bundle
     const medicationRequests = bundle.entry?.map((entry) => {
@@ -221,6 +229,32 @@ mcpRouter.post("/get_family_member_history", async (req: Request, res: Response)
         const resource = entry.resource;
         if (!resource || resource.resourceType !== "FamilyMemberHistory") return null;
 
+        const conditions =
+          resource.condition?.map((cond: any) => {
+            const conditionName =
+              cond.code?.text ||
+              cond.code?.coding?.[0]?.display ||
+              "(Unknown Condition)";
+
+            // Look for modifierExtension.valueCodeableConcept.text (e.g., "POSITIVE", "NEGATIVE")
+            const modifier =
+              cond.modifierExtension?.[0]?.valueCodeableConcept?.text ||
+              cond.modifierExtension?.[0]?.valueCodeableConcept?.coding?.[0]
+                ?.display ||
+              "";
+
+            // Normalize casing: "POSITIVE" → "Positive", "NEGATIVE" → "Negative"
+            const formattedModifier = modifier
+              ? modifier.charAt(0).toUpperCase() +
+              modifier.slice(1).toLowerCase()
+              : "";
+
+            // Combine both into readable output
+            return formattedModifier
+              ? `${conditionName} - ${formattedModifier}`
+              : conditionName;
+          }) || [];
+
         return {
           id: resource.id,
           status: resource.status,
@@ -232,6 +266,7 @@ mcpRouter.post("/get_family_member_history", async (req: Request, res: Response)
           sex: resource.sex?.text || resource.sex?.coding?.[0]?.display || "",
           date: resource.date || "",
           note: resource.note?.map((n) => n.text).join("; ") || "",
+          conditions
         };
       }).filter(Boolean) || [];
 
@@ -322,6 +357,127 @@ mcpRouter.post("/get_immunizations", async (req: Request, res: Response) => {
     handleApiError(err, res, "get_immunizations", req);
   }
 });
+
+mcpRouter.post("/get_persons", async (req: Request, res: Response) => {
+  const parse = GetPersonsInput.safeParse(req.body);
+  const accessToken = req.body.token;
+
+  if (!parse.success) {
+    return res.status(400).json({
+      error: {
+        message: "Validation failed",
+        code: "VALIDATION_ERROR",
+        details: parse.error.flatten().fieldErrors,
+      },
+      metadata: {
+        requestId: Math.random().toString(36).substring(2, 15),
+        timestamp: new Date().toISOString(),
+        url: req.url,
+        requestTime: Date.now(),
+      },
+    });
+  }
+
+  try {
+    const bundle = await getPersons(parse.data, accessToken);
+
+    const persons =
+      bundle.entry
+        ?.map((entry) => {
+          const resource = entry.resource;
+          if (!resource || resource.resourceType !== "Person") return null;
+
+          return {
+            id: resource.id,
+            active: resource.active ?? null,
+            name: resource.name?.[0]?.text || (
+              resource.name?.[0]
+                ? `${resource.name?.[0].given?.join(" ") || ""} ${resource.name?.[0].family || ""}`.trim()
+                : ""
+            ),
+            gender: resource.gender || "",
+            birthDate: resource.birthDate || "",
+            telecom: resource.telecom || [],
+            address: resource.address?.[0]?.text || "",
+          };
+        })
+        .filter(Boolean) || [];
+
+    res.json({
+      success: true,
+      persons,
+      count: persons.length,
+      metadata: {
+        requestId: Math.random().toString(36).substring(2, 15),
+        timestamp: new Date().toISOString(),
+        url: req.url,
+        requestTime: Date.now(),
+      },
+    });
+  } catch (err: any) {
+    handleApiError(err, res, "get_persons", req);
+  }
+});
+
+mcpRouter.post("/get_procedures", async (req: Request, res: Response) => {
+  const parse = GetProceduresInput.safeParse(req.body);
+  const accessToken = req.body.token;
+
+  if (!parse.success) {
+    return res.status(400).json({
+      error: {
+        message: "Validation failed",
+        code: "VALIDATION_ERROR",
+        details: parse.error.flatten().fieldErrors,
+      },
+      metadata: {
+        requestId: Math.random().toString(36).substring(2, 15),
+        timestamp: new Date().toISOString(),
+        url: req.url,
+        requestTime: Date.now(),
+      },
+    });
+  }
+
+  try {
+    const bundle = await getProcedures(parse.data, accessToken);
+
+    const procedures =
+      bundle.entry
+        ?.map((entry) => {
+          const resource = entry.resource;
+          if (!resource || resource.resourceType !== "Procedure") return null;
+
+          return {
+            id: resource.id,
+            status: resource.status || "",
+            code: resource.code?.coding?.[0]?.display || "",
+            subject: resource.subject?.reference || resource.patient?.reference || "",
+            performed: resource.performedDateTime || resource.performedPeriod?.start || "",
+            performer: resource.performer?.[0]?.actor?.display || resource.performer?.[0]?.actor?.reference || "",
+            location: resource.location?.display || "",
+            note: resource.note?.map((n: any) => n.text).join("; ") || ""
+          };
+        })
+        .filter(Boolean) || [];
+
+    res.json({
+      success: true,
+      procedures,
+      count: procedures.length,
+      metadata: {
+        requestId: Math.random().toString(36).substring(2, 15),
+        timestamp: new Date().toISOString(),
+        url: req.url,
+        requestTime: Date.now(),
+      },
+    });
+  } catch (err: any) {
+    handleApiError(err, res, "get_procedures", req);
+  }
+});
+
+
 
 
 

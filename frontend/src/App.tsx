@@ -33,11 +33,11 @@ export function App() {
     setInput('');
     setLoading(true);
     try {
-      // const authToken = JSON.parse(sessionStorage.getItem('tokenResponse')!);
-      // let accessToken: string = "";
-      // if (authToken != null && authToken['access_token']) {
-      //   accessToken = authToken['access_token']
-      // }
+      const authToken = JSON.parse(sessionStorage.getItem('tokenResponse')!);
+      let accessToken: string = "";
+      if (authToken != null && authToken['access_token']) {
+        accessToken = authToken['access_token']
+      }
       const resp = await fetch(`${backendUrl}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
@@ -61,17 +61,17 @@ export function App() {
     }
   };
 
-  // useEffect(() => {
-  //   FHIR.oauth2.ready((client: any) => {
-  //     const token = client.state.tokenResponse.access_token;
-  //     const refresh = client.state.tokenResponse.refresh_token;
+  useEffect(() => {
+    FHIR.oauth2.ready((client: any) => {
+      const token = client.state.tokenResponse.access_token;
+      const refresh = client.state.tokenResponse.refresh_token;
 
-  //     console.log('Access Token:', token);
-  //     console.log('Refresh Token:', refresh);
+      console.log('Access Token:', token);
+      console.log('Refresh Token:', refresh);
 
-  //     sessionStorage.setItem('access_token', token);
-  //   });
-  // }, []);
+      sessionStorage.setItem('access_token', token);
+    });
+  }, []);
 
   return (
     <div style={{ maxWidth: 800, margin: '0 auto', padding: 16, fontFamily: 'system-ui' }}>
